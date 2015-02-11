@@ -1,0 +1,159 @@
+#!/bin/bash
+
+declare -r nJugMax=10
+declare -r nSortMax=15 
+declare -a vecSort
+
+#Las siguientes variables iniciadas con 'c', significa
+#que seran variables para controlar el color de la salida
+cNormal=$(tput sgr0)
+cError=$(tput bold)$(tput setaf 1)$(tput smul)
+cAnnouncement=$(tput setaf 3)
+cGood=$(tput setaf 2)
+
+#Esta funcion muestra la ayuda del programa
+usage(){
+	echo ""
+	echo "Uso correcto del programa:"
+	echo "loteria [n] [m]"
+	echo "n -> numero de sorteos, comprendido entre [1, $nSortMax]"
+	echo "m -> numero de jugadores por sorteo comprendido entre [1, $nJugMax]"
+	echo ""
+}
+#Esta funcion lanza una pregunta binaria en una o dos lineas (y devuelve 1 o 0 segun la respuesta)
+question(){
+	while true; do
+		if [ "$2" ]; then
+			echo -e "$1\n$2 (S/N) "
+			read -p "" yn
+		else
+	    	read -p "$1 (S/N)" yn
+	    fi
+	    case $yn in
+	        [YySs] | [Yy][Ee][Ss] | [Ss][Ii] ) return 1;;
+	        [Nn] | [Nn][oO] ) return 0;;
+	        * ) echo "Por favor responda si o no";;
+	    esac
+	done
+}
+#Funcion para borrar archivos
+removefiles(){
+	files=`ls | egrep '^S([0-9]||[0-9][0-9])R$'`
+	$(rm -rf $files)
+}
+
+
+#Inicio del programa
+
+#Comprueba si existe el programa sorteo antes de ejecutar el script
+if [[ ! -a "sorteo" ]]; then
+	echo $cError"ERROR: No existe el programa 'sorteo'"$cNormal
+	echo "El programa necesita compilarse antes mediante 'make' o 'make sorteo'"
+	question "Quiere compilar el programa desde aqui?"
+	answ=$?
+	if [[ answ -ne 0 ]];then
+		make sorteo
+		if [[ $? != 0 ]]; then
+			echo $cError"ERROR: No se ha encontrado fichero 'makefile'"
+			exit
+		else 
+			echo $cGood"Programa compilado correctamente"$cNormal 
+		fi
+	else
+		exit
+	fi
+fi
+
+#Existe, comprobamos parametros
+if [ $# -ne 2 ]; then 
+		echo $cError"Numero de parametros incorrecto"$cNormal
+		usage
+		exit
+elif [ $1 -gt $nSortMax ] || [ $1 -lt 1 ]; then #Sorteos incorrecto
+		echo $cError"El numero de sorteos no es correcto"$cNormal
+		usage
+		exit
+	elif [ $2 -gt $nJugMax ] || [ $2 -lt 1 ]; then #Jugadores incorrectos
+		echo $cError"El numeros de jugadores no es correcto"$cNormal
+		usage
+		exit
+	else
+		#Sin fallos, comprobamos si hay ficheros de resultados anteriores
+		files=`ls | egrep '^S([0-9]||[0-9][0-9])R$'`
+		if [[ $files !=  "" ]] #Hay ficheros
+		then
+			echo $cAnnouncement"Se han encontrado ficheros de sorteos antiguos"$cNormal
+			question "Desea eliminar los ficheros de resultados antiguos?" "(Es necesario para la ejecución del programa)"
+			answ=$?
+			if [[ answ -ne 0 ]];then
+				echo $cAnnouncement"Procediendo al borrado..."$cNormal
+				removefiles
+				echo $cGood"Ok"$cNormal
+			else
+				echo $cAnnouncement"Saliendo del programa"$cNormal
+				exit
+			fi
+		else
+			echo $cAnnouncement"No hay archivos de sorteos anteriores"$cnormal
+		fi
+			echo $cAnnouncement"Realizando sorteos nuevos"$cNormal
+		#Bucle de ejecucion de los sorteos
+		for ((a=1; a <= $1; a++))
+		do
+			echo "Sorteo $a / $1"
+			./sorteo $a $2
+			#Comprueba si hubo algun error
+			if [[ $? -ne 0 ]]; then
+				echo $cError"Hubo un error al realizar el sorteo"$cNormal
+				echo $cAnnouncement"	Se va a proceder a borrar TODOS los resultados de esta ejecucion" $cNormal
+				question "Esta de acuerdo?"
+				answ=$?
+				if [[ answ -ne 0 ]]; then
+					removefiles
+				fi
+				exit
+			fi
+		done
+		echo $cAnnouncement"Procesando resultados de sorteos..." $cNormal
+		#Realizar el informe de resultados
+		for (( a=1; a <= $1; a++ ))
+		do
+			nombre=S${a}R
+			lin=1
+			#Sustituimos los espacios por barras para evitar errores en el terminal
+			for linea in `cat $nombre | tr -s ' ' '_'`
+			do
+				if [ ${linea:0:1} != '#' ]; #Ignora comentarios (Al principio de la linea)
+				then
+					templinea=""
+					lon="0"
+					while [[ "${linea:$lon:1}" != "#" ]] && [[ $lon -ne ${#linea} ]]; do #Copia texto hasta comentario o final de linea
+						if [ "${linea:$lon:1}" != "_" ]; then #Copia el texto dejandose sin copiar los espacios, que ahora son _
+							templinea=$templinea${linea:$lon:1}
+						fi
+						let lon++;
+					done
+					vecSort[lin]=$(expr ${vecSort[lin]} + $templinea)
+					let lin++;
+				fi
+			done
+		done
+		echo "Informe de resultados:"
+		echo "	Numero de Sorteos: "$cGood $1 $cNormal "Numero de jugadores: "$cGood $2 $cNormal
+		echo ""
+		for i in `seq $2`
+		do
+				echo "	Jugador: "$i "	Premio total:" $cGood${vecSort[$i]}$cNormal" €"
+		done
+		echo ""
+		question "Desea conservar los ficheros de resultados?"
+			answ=$?
+			if [[ answ -ne 0 ]];then
+				exit
+			else
+				echo $cAnnouncement"Procediendo al borrado..."$cNormal
+				removefiles
+				echo $cGood"Ok"$cNormal
+				exit
+			fi
+	fi
